@@ -58,12 +58,10 @@ class LocationService : Service() {
                                 areaList = loc.latitude.let {
                                     mGeocoder?.getFromLocation(it, loc.longitude, 1)
                                 }
-
                                 val locality = areaList?.get(0)
-                                val area = locality?.locality
                                 sendBroadCast(loc.latitude, loc.longitude, locality?.getAddressLine(locality.maxAddressLineIndex))
-                            }catch (_: Exception){
-
+                            }
+                            catch (_: Exception){
                             }
                         }
 

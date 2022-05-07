@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
+import android.app.Instrumentation.ActivityResult
 import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -16,11 +17,15 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.telephony.SmsManager
 import android.util.Log
 import android.view.View
 import android.view.Window
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
@@ -39,9 +44,9 @@ import com.google.android.gms.vision.face.Face
 import com.google.android.gms.vision.face.FaceDetector
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputLayout
-import com.google.mlkit.common.model.LocalModel
-import com.google.mlkit.vision.label.ImageLabeling
-import com.google.mlkit.vision.label.custom.CustomImageLabelerOptions
+//import com.google.mlkit.common.model.LocalModel
+//import com.google.mlkit.vision.label.ImageLabeling
+//import com.google.mlkit.vision.label.custom.CustomImageLabelerOptions
 import com.saksham.driverdrwosy.R
 import com.saksham.driverdrowsy.camera.CameraSourcePreview
 import com.saksham.driverdrowsy.camera.GraphicOverlay
@@ -50,7 +55,8 @@ import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 
-class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationListener {
+class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationListener,
+    RecognitionListener {
 
     private lateinit var mPreview: CameraSourcePreview
     private lateinit var mGraphicOverlay: GraphicOverlay
@@ -72,6 +78,8 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
     private lateinit var sharedPreferences: SharedPreferences
     private var vol = 0
     private lateinit var audioManager: AudioManager
+    lateinit var dig: AlertDialog
+    lateinit var speechRecognizer: SpeechRecognizer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,15 +87,32 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         sharedPreferences = getSharedPreferences("MySharedPref", MODE_PRIVATE)
 
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer.setRecognitionListener(this)
+        dig = AlertDialog.Builder(this)
+            .setTitle("Drowsy Alert !!!")
+            .setMessage("Tracker suspects that the driver is experiencing Drowsiness, Please park your car on side.")
+            .setPositiveButton(
+                android.R.string.ok
+            ) { dialog, which ->
+                stop_playing()
+                flag = 0
+            }.setIcon(android.R.drawable.ic_dialog_alert)
+            .create()
+        dig.setOnDismissListener {
+            stop_playing()
+            flag = 0
+        }
+
         val dialog = AlertDialog.Builder(this)
             .setTitle("Privacy Policy")
-            .setMessage("By using this application you agree to allow us to use the location and camera of device as and when required only for emergency purpose and to monitor drowsiness. This application in no way collects, stores or send any user information anywhere. This application in no way provides safety against accident in case the driver sleeps. This application is not a replacement to driving when sleepy. Please stop the car immediately away from traffic if you feel drowsy at any given point of time. Driving when sleepy is extremely dangerous can lead serious accidents or death.")
+            .setMessage("By using this application you agree to allow us to use the location, camera and microphone of device as and when required only while using the app, for emergency purpose and to monitor drowsiness. This application in no way collects, stores or send any user information anywhere. This application in no way provides safety against accident in case the driver sleeps. This application is not a replacement to driving when sleepy. Please stop the car immediately, away from traffic if you feel drowsy at any given point of time. Driving when sleepy is extremely dangerous can lead serious accidents or death.")
             .setCancelable(false)
-            .setPositiveButton("Ok"){ dialog, which ->
-                sharedPreferences.edit().putBoolean("privacy",true).apply()
+            .setPositiveButton("Ok") { dialog, which ->
+                sharedPreferences.edit().putBoolean("privacy", true).apply()
                 dialog.dismiss()
             }
-            .setNegativeButton("Cancel"){ dialog, which ->
+            .setNegativeButton("Cancel") { dialog, which ->
                 dialog.dismiss()
                 finishAffinity()
             }
@@ -115,14 +140,14 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
             }
         }
 
-        if(sharedPreferences.getString("phone", null).isNullOrEmpty()){
+        if (sharedPreferences.getString("phone", null).isNullOrEmpty()) {
             showPhoneDialog()
         }
         tv = findViewById(R.id.textView3)
         tv_1 = findViewById(R.id.textView4)
         initCrashAlertDialog()
 
-        if(!sharedPreferences.getBoolean("privacy", false)){
+        if (!sharedPreferences.getBoolean("privacy", false)) {
             dialog.show()
         }
 
@@ -155,7 +180,10 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         ) {
             requestPermissions(
                 arrayOf(
-                    Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.SEND_SMS
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.SEND_SMS,
+                    Manifest.permission.RECORD_AUDIO
                 ),
                 4
             )
@@ -164,11 +192,11 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
     }
 
     override fun onLocationChanged(p0: Location) {
-        if(p0.hasSpeed() && tv_1.text == "Face Missing")
-           AlertDialog.Builder(this)
+        if (p0.hasSpeed() && tv_1.text == "Face Missing")
+            AlertDialog.Builder(this)
                 .setTitle("Face Missing")
                 .setMessage("It appears that you are driving and your face is not being tracked. Please fix your phone in such a way that you face is visible at all times to the device front camera")
-                .setPositiveButton("Ok"){ dialog ,_ ->
+                .setPositiveButton("Ok") { dialog, _ ->
                     dialog.dismiss()
                 }.show()
     }
@@ -187,12 +215,13 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         textInputLayout.editText?.doAfterTextChanged { textInputLayout.error = null }
 
         save.setOnClickListener {
-            if (textInputLayout.editText?.text.isNullOrEmpty()){
+            if (textInputLayout.editText?.text.isNullOrEmpty()) {
                 textInputLayout.error = "Enter a valid number"
                 textInputLayout.requestFocus()
                 return@setOnClickListener
             }
-            sharedPreferences.edit().putString("phone" ,textInputLayout.editText?.text.toString()).apply()
+            sharedPreferences.edit().putString("phone", textInputLayout.editText?.text.toString())
+                .apply()
             dialog.dismiss()
         }
 
@@ -206,10 +235,90 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(
-                arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.SEND_SMS),
+                arrayOf(
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.SEND_SMS,
+                    Manifest.permission.RECORD_AUDIO
+                ),
                 SMS_REQUEST_CODE
             )
         }
+    }
+
+    override fun onReadyForSpeech(params: Bundle?) {
+        Toast.makeText(this@MainActivity, "ready", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onBeginningOfSpeech() {
+
+    }
+
+    override fun onRmsChanged(rmsdB: Float) {
+
+    }
+
+    override fun onBufferReceived(buffer: ByteArray?) {
+
+    }
+
+    override fun onEndOfSpeech() {
+
+    }
+
+    override fun onError(error: Int) {
+
+    }
+
+    override fun onResults(results: Bundle?) {
+
+    }
+
+    override fun onPartialResults(partialResults: Bundle?) {
+        val result = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+        if (result != null) {
+            for (s in result) {
+                if (s.contains("stop") || s.contains("shop") || s.contains("top"))
+                    stopDialog()
+            }
+        }
+    }
+
+    override fun onEvent(eventType: Int, params: Bundle?) {
+
+    }
+
+    private fun speechRecognition() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,Locale.US.toString())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to text")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        speechRecognizer.startListening(intent)
+
+    }
+
+    private val startSpeechRecognition =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.data != null) {
+                val result = it.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                if (result?.get(0)?.contains("stop") == true || result?.get(0)
+                        ?.contains("shop") == true
+                )
+                    stopDialog()
+            }
+
+        }
+
+    fun stopDialog() {
+        dig.dismiss()
+        stop_playing()
+        speechRecognizer.destroy()
+
     }
 
     private fun requestCameraPermission() {
@@ -217,7 +326,12 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
             "TAG",
             "Camera permission is not granted. Requesting permission"
         )
-        val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.SEND_SMS)
+        val permissions = arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.SEND_SMS,
+            Manifest.permission.RECORD_AUDIO
+        )
         if (!ActivityCompat.shouldShowRequestPermissionRationale(
                 this,
                 Manifest.permission.CAMERA
@@ -254,7 +368,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
             MultiProcessor.Builder(GraphicFaceTrackerFactory())
                 .build()
         )
-        loadModel()
+//        loadModel()
         if (!detector.isOperational) {
             // Note: The first time that an app using face API is installed on a device, GMS will
             // download a native library to the device in order to do detection.  Usually this
@@ -273,7 +387,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         cameraSource = CameraSource.Builder(context, detector)
             .setRequestedPreviewSize(640, 480)
             .setFacing(CameraSource.CAMERA_FACING_FRONT)
-            .setRequestedFps(45.0f)
+            .setRequestedFps(60.0f)
             .build()
     }
 
@@ -374,20 +488,20 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
 
     }
 
-    fun loadModel(){
-        try {
-            val localModel = LocalModel.Builder()
-                .setAssetFilePath("android.resource://$packageName/model.tflite")
-                .build()
-
-            val customImageLabelerOptions = CustomImageLabelerOptions.Builder(localModel)
-                .setConfidenceThreshold(0.5f)
-                .setMaxResultCount(5)
-                .build()
-            ImageLabeling.getClient(customImageLabelerOptions)
-        }
-        catch (_:Exception){}
-    }
+//    fun loadModel(){
+//        try {
+//            val localModel = LocalModel.Builder()
+//                .setAssetFilePath("android.resource://$packageName/model.tflite")
+//                .build()
+//
+//            val customImageLabelerOptions = CustomImageLabelerOptions.Builder(localModel)
+//                .setConfidenceThreshold(0.5f)
+//                .setMaxResultCount(5)
+//                .build()
+//            ImageLabeling.getClient(customImageLabelerOptions)
+//        }
+//        catch (_:Exception){}
+//    }
 
     override fun onResume() {
         super.onResume()
@@ -435,7 +549,11 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
     fun play_media() {
         vol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
         if (vol < 100) {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 100,0)
+            audioManager.setStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+                0
+            )
         }
         stop_playing()
         mp = MediaPlayer.create(this, R.raw.buzzer)
@@ -448,7 +566,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
             mp?.release()
             mp = null
         }
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, vol,0)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, vol, 0)
     }
 
 
@@ -495,7 +613,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
             return
         }
-        if(requestCode == 157)
+        if (requestCode == 157)
             getLocation()
 
         if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -521,20 +639,8 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         play_media()
         runOnUiThread {
             play_media()
-            val dig: AlertDialog = AlertDialog.Builder(this)
-                .setTitle("Drowsy Alert !!!")
-                .setMessage("Tracker suspects that the driver is experiencing Drowsiness, Please park your car on side.")
-                .setPositiveButton(
-                    android.R.string.ok
-                ) { dialog, which ->
-                    stop_playing()
-                    flag = 0
-                }.setIcon(android.R.drawable.ic_dialog_alert)
-                .show()
-            dig.setOnDismissListener {
-                stop_playing()
-                flag = 0
-            }
+            speechRecognition()
+            dig.show()
         }
     }
 
@@ -566,7 +672,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
 
     private val mServiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent?) {
-            val latitude = intent?.getDoubleExtra("Latitude",0.0)
+            val latitude = intent?.getDoubleExtra("Latitude", 0.0)
             val longitude = intent?.getDoubleExtra("Longitude", 0.0)
             val address = intent?.getStringExtra("Address")
             if (latitude != null && longitude != null) {
@@ -578,10 +684,11 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
     fun sendEmergencyMessage(longitude: Double, latitude: Double, address: String) {
         val msg =
             "I might have been in a collision around $address."
-        val msg2 = "My current location is: https://www.google.com/maps/place/$latitude,$longitude \n\nBring some help."
+        val msg2 =
+            "My current location is: https://www.google.com/maps/place/$latitude,$longitude \n\nBring some help."
         val smsManager: SmsManager = getSystemService(SmsManager::class.java)
         val phone = sharedPreferences.getString("phone", null)
-        if(phone != null) {
+        if (phone != null) {
             smsManager.sendTextMessage(phone, null, msg, null, null)
             smsManager.sendTextMessage(phone, null, msg2, null, null)
         }
