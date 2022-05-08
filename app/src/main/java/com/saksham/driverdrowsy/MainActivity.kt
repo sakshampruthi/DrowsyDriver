@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
-import android.app.Instrumentation.ActivityResult
 import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -23,16 +22,13 @@ import android.speech.SpeechRecognizer
 import android.telephony.SmsManager
 import android.util.Log
 import android.view.View
-import android.view.Window
 import android.widget.*
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.appcompat.widget.AppCompatToggleButton
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.app.ActivityCompat
-import androidx.core.widget.TextViewCompat
 import androidx.core.widget.doAfterTextChanged
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
@@ -44,26 +40,23 @@ import com.google.android.gms.vision.face.Face
 import com.google.android.gms.vision.face.FaceDetector
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputLayout
+import com.saksham.driverdrowsy.camera.CameraSourcePreview
 //import com.google.mlkit.common.model.LocalModel
 //import com.google.mlkit.vision.label.ImageLabeling
 //import com.google.mlkit.vision.label.custom.CustomImageLabelerOptions
 import com.saksham.driverdrwosy.R
-import com.saksham.driverdrowsy.camera.CameraSourcePreview
 import com.saksham.driverdrowsy.camera.GraphicOverlay
-import com.tbruyelle.rxpermissions3.RxPermissions
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 
-class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationListener,
-    RecognitionListener {
+class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationListener {
 
     private lateinit var mPreview: CameraSourcePreview
     private lateinit var mGraphicOverlay: GraphicOverlay
     private lateinit var end_button: AppCompatButton
     private lateinit var layout: ConstraintLayout
     private lateinit var n_mode: AppCompatToggleButton
-    private lateinit var tv: AppCompatTextView
     private lateinit var tv_1: AppCompatTextView
     private var cameraSource: CameraSource? = null
     private var mp: MediaPlayer? = null
@@ -88,7 +81,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         sharedPreferences = getSharedPreferences("MySharedPref", MODE_PRIVATE)
 
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        speechRecognizer.setRecognitionListener(this)
+        speechRecognizer.setRecognitionListener(speechListener)
         dig = AlertDialog.Builder(this)
             .setTitle("Drowsy Alert !!!")
             .setMessage("Tracker suspects that the driver is experiencing Drowsiness, Please park your car on side.")
@@ -143,7 +136,6 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         if (sharedPreferences.getString("phone", null).isNullOrEmpty()) {
             showPhoneDialog()
         }
-        tv = findViewById(R.id.textView3)
         tv_1 = findViewById(R.id.textView4)
         initCrashAlertDialog()
 
@@ -246,46 +238,48 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         }
     }
 
-    override fun onReadyForSpeech(params: Bundle?) {
-        Toast.makeText(this@MainActivity, "ready", Toast.LENGTH_SHORT).show()
-    }
+    private val speechListener = object : RecognitionListener {
 
-    override fun onBeginningOfSpeech() {
+        override fun onReadyForSpeech(params: Bundle?) {
+        }
 
-    }
+        override fun onBeginningOfSpeech() {
 
-    override fun onRmsChanged(rmsdB: Float) {
+        }
 
-    }
+        override fun onRmsChanged(rmsdB: Float) {
 
-    override fun onBufferReceived(buffer: ByteArray?) {
+        }
 
-    }
+        override fun onBufferReceived(buffer: ByteArray?) {
 
-    override fun onEndOfSpeech() {
+        }
 
-    }
+        override fun onEndOfSpeech() {
 
-    override fun onError(error: Int) {
+        }
 
-    }
+        override fun onError(error: Int) {
 
-    override fun onResults(results: Bundle?) {
+        }
 
-    }
+        override fun onResults(results: Bundle?) {
 
-    override fun onPartialResults(partialResults: Bundle?) {
-        val result = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        if (result != null) {
-            for (s in result) {
-                if (s.contains("stop") || s.contains("shop") || s.contains("top"))
-                    stopDialog()
+        }
+
+        override fun onPartialResults(partialResults: Bundle?) {
+            val result = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            if (result != null) {
+                for (s in result) {
+                    if (s.contains("stop") || s.contains("shop") || s.contains("top"))
+                        stopDialog()
+                }
             }
         }
-    }
 
-    override fun onEvent(eventType: Int, params: Bundle?) {
+        override fun onEvent(eventType: Int, params: Bundle?) {
 
+        }
     }
 
     private fun speechRecognition() {
@@ -301,18 +295,6 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         speechRecognizer.startListening(intent)
 
     }
-
-    private val startSpeechRecognition =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            if (it.data != null) {
-                val result = it.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                if (result?.get(0)?.contains("stop") == true || result?.get(0)
-                        ?.contains("shop") == true
-                )
-                    stopDialog()
-            }
-
-        }
 
     fun stopDialog() {
         dig.dismiss()
