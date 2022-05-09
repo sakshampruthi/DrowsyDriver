@@ -539,6 +539,7 @@ class MainActivity : AppCompatActivity(), CrashDetector.CrashListener, LocationL
         }
         stop_playing()
         mp = MediaPlayer.create(this, R.raw.buzzer)
+        mp?.isLooping = true
         mp?.start()
     }
 
